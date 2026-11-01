@@ -31,8 +31,9 @@ jobs:
             updater.forceDevUpdateConfig=true;
             updater.autoDownload=false;
             updater.autoInstallOnAppQuit=false;
-            updater.updateConfigPath=path.join(__dirname,'feed.yml');
-            fs.writeFileSync(updater.updateConfigPath,'provider: generic\nurl: https://github.com/SensoredRooster/Unicorn-Downloads/releases/latest/download/\nchannel: preview\nupdaterCacheDirName: unicorn-update-verification\n');
+            const configFile=path.join(__dirname,'feed.yml');
+            updater.updateConfigPath=configFile;
+            fs.writeFileSync(configFile,'provider: generic\nurl: https://github.com/SensoredRooster/Unicorn-Downloads/releases/latest/download/\nchannel: preview\nupdaterCacheDirName: unicorn-update-verification\n');
             updater.setFeedURL({provider:'generic',url:'https://github.com/SensoredRooster/Unicorn-Downloads/releases/latest/download/',channel:'preview'});
             const result=await updater.checkForUpdates();
             if(!result?.isUpdateAvailable)throw Error('No newer preview detected');
