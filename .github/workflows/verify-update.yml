@@ -28,6 +28,7 @@ jobs:
             const {NsisUpdater}=require('electron-updater');
             const updater=new NsisUpdater();
             app.getVersion=getVersion;
+            updater.forceDevUpdateConfig=true;
             updater.autoDownload=false;
             updater.autoInstallOnAppQuit=false;
             updater.updateConfigPath=path.join(__dirname,'feed.yml');
@@ -42,9 +43,9 @@ jobs:
             app.exit(0);
           }).catch(e=>{console.error(e);app.exit(1)});
           '@ | Set-Content qa/check.cjs
-          $p=Start-Process qa/node_modules/electron/dist/electron.exe -ArgumentList @('qa/check.cjs') -PassThru
+          $p=Start-Process qa/node_modules/electron/dist/electron.exe -ArgumentList @('qa/check.cjs') -RedirectStandardOutput qa/updater.log -RedirectStandardError qa/updater-error.log -PassThru
           if(-not $p.WaitForExit(180000)){Stop-Process -Id $p.Id -Force;throw 'Updater timed out'}
-          if($p.ExitCode -ne 0){throw 'Updater verification failed'}
+          if($p.ExitCode -ne 0){Get-Content qa/updater.log;Get-Content qa/updater-error.log;throw 'Updater verification failed'}
       - name: Install downloaded update and check two launches
         shell: pwsh
         run: |
