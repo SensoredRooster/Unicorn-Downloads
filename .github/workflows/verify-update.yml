@@ -13,6 +13,9 @@ jobs:
           node-version: '22'
       - name: Install pinned update test runtime
         run: npm install --prefix qa electron@45.2.1 electron-updater@6.8.3 --no-audit --no-fund
+      - name: Download pinned Electron runtime
+        working-directory: qa
+        run: npm exec --no -- install-electron
       - name: Download through actual NSIS updater
         shell: pwsh
         run: |
