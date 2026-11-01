@@ -1,0 +1,68 @@
+name: Verify Windows update download
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install pinned update test runtime
+        run: npm install --prefix qa electron@45.2.1 electron-updater@6.8.3 --no-audit --no-fund
+      - name: Download through actual NSIS updater
+        shell: pwsh
+        run: |
+          @'
+          const {app}=require('electron');
+          const fs=require('node:fs'),path=require('node:path');
+          app.whenReady().then(async()=>{
+            const getVersion=app.getVersion.bind(app);
+            app.getVersion=()=> '0.3.0-preview.6';
+            const {NsisUpdater}=require('electron-updater');
+            const updater=new NsisUpdater();
+            app.getVersion=getVersion;
+            updater.autoDownload=false;
+            updater.autoInstallOnAppQuit=false;
+            updater.updateConfigPath=path.join(__dirname,'feed.yml');
+            fs.writeFileSync(updater.updateConfigPath,'provider: generic\nurl: https://github.com/SensoredRooster/Unicorn-Downloads/releases/latest/download/\nchannel: preview\nupdaterCacheDirName: unicorn-update-verification\n');
+            updater.setFeedURL({provider:'generic',url:'https://github.com/SensoredRooster/Unicorn-Downloads/releases/latest/download/',channel:'preview'});
+            const result=await updater.checkForUpdates();
+            if(!result?.isUpdateAvailable)throw Error('No newer preview detected');
+            const files=await updater.downloadUpdate();
+            const installer=files.find(f=>f.endsWith('.exe'));
+            if(!installer)throw Error('No verified Windows installer downloaded');
+            fs.writeFileSync(path.join(__dirname,'download.json'),JSON.stringify({passed:true,version:result.updateInfo.version,installer}));
+            app.exit(0);
+          }).catch(e=>{console.error(e);app.exit(1)});
+          '@ | Set-Content qa/check.cjs
+          $p=Start-Process qa/node_modules/electron/dist/electron.exe -ArgumentList @('qa/check.cjs') -PassThru
+          if(-not $p.WaitForExit(180000)){Stop-Process -Id $p.Id -Force;throw 'Updater timed out'}
+          if($p.ExitCode -ne 0){throw 'Updater verification failed'}
+      - name: Install downloaded update and check two launches
+        shell: pwsh
+        run: |
+          $result=Get-Content qa/download.json -Raw | ConvertFrom-Json
+          $dir=Join-Path $env:RUNNER_TEMP 'unicorn-live-update'
+          $p=Start-Process $result.installer -ArgumentList @('/S',"/D=$dir") -PassThru
+          if(-not $p.WaitForExit(120000) -or $p.ExitCode -ne 0){throw 'Downloaded installer failed'}
+          $data=Join-Path $env:RUNNER_TEMP 'unicorn-live-update-data'
+          foreach($i in 1,2){
+            $report=Join-Path $env:RUNNER_TEMP "update-smoke-$i.json"
+            $p=Start-Process (Join-Path $dir 'The Unicorn.exe') -ArgumentList @('--smoke-test',"--smoke-report=$report","--smoke-data-dir=$data") -PassThru
+            if(-not $p.WaitForExit(90000)){Stop-Process -Id $p.Id -Force;throw 'Updated app timed out'}
+            if($p.ExitCode -ne 0){Get-Content $report;throw 'Updated app failed'}
+            $r=Get-Content $report -Raw | ConvertFrom-Json
+            if(-not $r.passed -or ($i -eq 2 -and -not $r.vaultRestored)){throw 'Updated app persistence failed'}
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-update-verification
+          path: |
+            qa/download.json
+            ${{ runner.temp }}/update-smoke-*.json
+            ${{ runner.temp }}/update-smoke-*.png
