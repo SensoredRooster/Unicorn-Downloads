@@ -1,0 +1,52 @@
+name: Publish verified desktop download
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_url:
+        description: Temporary download URL of the verified Windows artifact ZIP
+        required: true
+      artifact_sha256:
+        description: SHA256 of the complete artifact ZIP
+        required: true
+      version:
+        description: Release version (for example 0.3.0-preview.7)
+        required: true
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download and verify release files only
+        env:
+          ARTIFACT_URL: ${{ inputs.artifact_url }}
+          ARTIFACT_SHA: ${{ inputs.artifact_sha256 }}
+          VERSION: ${{ inputs.version }}
+        shell: python
+        run: |
+          import os,re,hashlib,urllib.request,urllib.parse,zipfile,pathlib
+          version=os.environ['VERSION']
+          assert re.fullmatch(r'\d+\.\d+\.\d+-preview\.\d+',version)
+          url=os.environ['ARTIFACT_URL'];u=urllib.parse.urlsplit(url)
+          assert u.scheme=='https' and u.hostname and u.hostname.endswith('.oaiusercontent.com')
+          assert re.fullmatch('[a-f0-9]{64}',os.environ['ARTIFACT_SHA'])
+          urllib.request.urlretrieve(url,'artifact.zip')
+          raw=pathlib.Path('artifact.zip').read_bytes()
+          assert hashlib.sha256(raw).hexdigest()==os.environ['ARTIFACT_SHA']
+          out=pathlib.Path('release');out.mkdir()
+          exe='The-Unicorn-Setup-'+version+'-x64.exe'
+          allowed={exe,exe+'.blockmap','preview.yml','latest.yml','SHA256SUMS.txt'}
+          with zipfile.ZipFile('artifact.zip') as z:
+              for name in allowed:
+                  if name in z.namelist():
+                      data=z.read(name);assert len(data)<500*1024*1024
+                      (out/name).write_bytes(data)
+          assert (out/exe).exists() and (out/'preview.yml').exists()
+          sums=(out/'SHA256SUMS.txt').read_text().split()
+          assert sums[0]==hashlib.sha256((out/exe).read_bytes()).hexdigest()
+      - name: Publish download-only release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: gh release create "v$VERSION" release/* --repo SensoredRooster/Unicorn-Downloads --title "Unicorn $VERSION" --notes "Windows preview. Install over your existing version. Private model connection files are distributed separately." --latest
